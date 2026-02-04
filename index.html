@@ -451,6 +451,7 @@
             background: rgba(255, 204, 255, 0.1);
             border-radius: 20px;
             border: 2px solid var(--light-pink);
+            min-height: 300px;
         }
 
         .message {
@@ -560,10 +561,10 @@
             max-height: 200px;
             transition: all 0.3s ease;
             font-weight: 500;
+            outline: none;
         }
 
         .message-input:focus {
-            outline: none;
             border-color: var(--neon-pink);
             box-shadow: 0 0 25px rgba(255, 0, 255, 0.2);
         }
@@ -587,6 +588,17 @@
         .send-btn:hover {
             transform: translateY(-4px) rotate(10deg);
             box-shadow: 0 15px 35px rgba(255, 0, 255, 0.4);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .send-btn:disabled:hover {
+            transform: none;
+            box-shadow: var(--shadow-light);
         }
 
         /* === YÖNETİM SAYFASI === */
@@ -1218,6 +1230,7 @@
                     
                     <div class="admin-info">
                         <p><i class="fas fa-crown"></i> Yönetici Girişi: admin / Hayati1959</p>
+                        <p><i class="fas fa-user-plus"></i> Yeni kullanıcılar otomatik kaydolur</p>
                     </div>
                 </div>
             </div>
@@ -1490,11 +1503,11 @@
             ADMIN_PASSWORD: 'Hayati1959',
             
             // Sistem ayarları
-            AUTO_REFRESH: 5000, // 5 saniye
+            AUTO_REFRESH: 3000, // 3 saniye
             MAX_MESSAGES: 1000,
             MESSAGE_COOLDOWN: 1000, // 1 saniye
             MAX_USERS: 100,
-            VERSION: '2.1.0'
+            VERSION: '2.2.0'
         };
 
         // === UYGULAMA DURUMU ===
@@ -1510,7 +1523,8 @@
                 statusMessage: ''
             },
             lastMessageTime: 0,
-            isOnline: true
+            isOnline: true,
+            cooldownActive: false
         };
 
         // === GİRİŞ İŞLEMLERİ ===
@@ -1529,30 +1543,31 @@
                 return;
             }
             
-            // Kullanıcı doğrulama
+            // Admin kontrolü
             let role = 'user';
-            
             if (username === SYSTEM.ADMIN_USERNAME && password === SYSTEM.ADMIN_PASSWORD) {
                 role = 'admin';
-            } else {
-                // Normal kullanıcılar için basit doğrulama
-                const savedUsers = JSON.parse(localStorage.getItem('neon_chat_users') || '[]');
-                const existingUser = savedUsers.find(u => u.username === username);
-                
-                if (existingUser) {
-                    // Kayıtlı kullanıcı, şifre kontrolü
-                    if (existingUser.password !== password) {
-                        showNotification('Geçersiz şifre!', 'error');
-                        return;
-                    }
-                    role = existingUser.role || 'user';
-                } else {
-                    // Yeni kullanıcı kaydı
-                    showNotification('Yeni kullanıcı olarak kaydedildiniz!', 'success');
-                }
             }
             
-            // Kullanıcıyı oluştur
+            // Tüm kullanıcıları yükle
+            loadAllUsers();
+            
+            // Kullanıcı kontrolü
+            const existingUser = appState.users.find(u => u.username === username);
+            
+            if (existingUser) {
+                // Mevcut kullanıcı - şifre kontrolü
+                if (existingUser.password !== password) {
+                    showNotification('Geçersiz şifre!', 'error');
+                    return;
+                }
+                role = existingUser.role || role;
+            } else {
+                // YENİ KULLANICI - OTOMATİK KAYIT
+                showNotification(`Yeni kullanıcı kaydedildi: ${username}`, 'success');
+            }
+            
+            // Kullanıcıyı oluştur/güncelle
             appState.currentUser = {
                 username: username,
                 role: role,
@@ -1561,8 +1576,22 @@
                 statusMessage: '',
                 joinTime: Date.now(),
                 lastActive: Date.now(),
-                password: role === 'admin' ? SYSTEM.ADMIN_PASSWORD : password
+                password: password, // Şifreyi kaydet
+                email: `${username}@neonchat.com`,
+                avatarInitial: username.charAt(0).toUpperCase()
             };
+            
+            // Kullanıcıyı listeye ekle
+            if (!existingUser) {
+                appState.users.push(appState.currentUser);
+            } else {
+                // Mevcut kullanıcıyı güncelle
+                const index = appState.users.findIndex(u => u.username === username);
+                appState.users[index] = { ...appState.users[index], ...appState.currentUser };
+            }
+            
+            // Kullanıcıları kaydet
+            saveAllUsers();
             
             // Giriş animasyonu
             const loginScreen = document.getElementById('loginScreen');
@@ -1576,11 +1605,27 @@
             }, 500);
         }
 
+        function loadAllUsers() {
+            try {
+                const saved = localStorage.getItem('neon_chat_all_users');
+                if (saved) {
+                    appState.users = JSON.parse(saved);
+                }
+            } catch (error) {
+                console.error('Kullanıcılar yüklenemedi:', error);
+                appState.users = [];
+            }
+        }
+
+        function saveAllUsers() {
+            localStorage.setItem('neon_chat_all_users', JSON.stringify(appState.users));
+        }
+
         function initializeApp() {
             loadSettings();
             updateUserUI();
             loadMessages();
-            loadUsers();
+            loadOnlineUsers();
             startPolling();
             
             // Admin panelini göster/gizle
@@ -1593,7 +1638,12 @@
             showNotification(`Hoş geldiniz, ${appState.currentUser.username}!`, 'success');
             
             // Sistem mesajı ekle
-            addSystemMessage(`👑 ${appState.currentUser.username} sohbete katıldı!`);
+            addSystemMessage(`👤 ${appState.currentUser.username} sohbete katıldı!`);
+            
+            // Mesaj input'una odaklan
+            setTimeout(() => {
+                document.getElementById('messageInput').focus();
+            }, 500);
         }
 
         function updateUserUI() {
@@ -1665,8 +1715,8 @@
         }
 
         function sendMessage() {
-            const now = Date.now();
-            if (now - appState.lastMessageTime < SYSTEM.MESSAGE_COOLDOWN) {
+            // Cooldown kontrolü
+            if (appState.cooldownActive) {
                 showNotification('Lütfen biraz bekleyin!', 'warning');
                 return;
             }
@@ -1689,7 +1739,20 @@
                 color: appState.currentUser.avatarColor
             };
             
-            appState.lastMessageTime = now;
+            // Cooldown aktif et
+            appState.cooldownActive = true;
+            appState.lastMessageTime = Date.now();
+            
+            // Gönder butonunu devre dışı bırak
+            const sendBtn = document.querySelector('.send-btn');
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            
+            setTimeout(() => {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>';
+                appState.cooldownActive = false;
+            }, SYSTEM.MESSAGE_COOLDOWN);
             
             // Listeye ekle
             appState.messages.push(newMessage);
@@ -1703,6 +1766,9 @@
             // Input'u temizle
             input.value = '';
             autoResize(input);
+            
+            // Input'a tekrar odaklan
+            input.focus();
             
             // Bildirim göster
             showNotification('Mesaj gönderildi!', 'success');
@@ -1754,7 +1820,7 @@
             const broadcastMessage = {
                 id: 'brd_' + Date.now(),
                 text: `📢 DUYURU: ${message}`,
-                sender: appState.currentUser.username,
+                sender: 'Yönetici',
                 senderRole: 'admin',
                 timestamp: Date.now()
             };
@@ -1772,39 +1838,45 @@
         }
 
         // === KULLANICI İŞLEMLERİ ===
-        function loadUsers() {
+        function loadOnlineUsers() {
             try {
-                const saved = localStorage.getItem('neon_chat_users');
+                // Çevrimiçi kullanıcıları yükle
+                const saved = localStorage.getItem('neon_chat_online_users');
                 if (saved) {
-                    appState.users = JSON.parse(saved);
-                }
-                
-                // Mevcut kullanıcıyı ekle/güncelle
-                const userIndex = appState.users.findIndex(u => u.username === appState.currentUser.username);
-                if (userIndex > -1) {
-                    appState.users[userIndex] = { ...appState.users[userIndex], ...appState.currentUser, lastActive: Date.now() };
+                    const onlineUsers = JSON.parse(saved);
+                    
+                    // Mevcut kullanıcıyı ekle
+                    const currentUserIndex = onlineUsers.findIndex(u => u.username === appState.currentUser.username);
+                    if (currentUserIndex > -1) {
+                        onlineUsers[currentUserIndex] = { ...onlineUsers[currentUserIndex], ...appState.currentUser, lastActive: Date.now() };
+                    } else {
+                        onlineUsers.push({ ...appState.currentUser, lastActive: Date.now() });
+                    }
+                    
+                    // 5 dakikadan eski kullanıcıları çevrimdışı yap
+                    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+                    onlineUsers.forEach(user => {
+                        if (user.lastActive < fiveMinutesAgo) {
+                            user.isOnline = false;
+                        }
+                    });
+                    
+                    // Aktif kullanıcıları filtrele
+                    appState.users = onlineUsers.filter(u => u.lastActive > fiveMinutesAgo);
+                    
+                    // Kaydet
+                    localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
                 } else {
-                    appState.users.push({ ...appState.currentUser, joinTime: Date.now(), lastActive: Date.now() });
+                    // İlk kullanıcı
+                    appState.users = [appState.currentUser];
+                    localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
                 }
                 
-                // Çevrimdışı kullanıcıları temizle (10 dakikadan eski)
-                const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
-                appState.users = appState.users.filter(u => u.lastActive > tenMinutesAgo);
-                
-                saveUsers();
                 updateUsersUI();
             } catch (error) {
-                console.error('Kullanıcılar yüklenemedi:', error);
+                console.error('Çevrimiçi kullanıcılar yüklenemedi:', error);
                 appState.users = [appState.currentUser];
-                saveUsers();
             }
-        }
-
-        function saveUsers() {
-            if (appState.users.length > SYSTEM.MAX_USERS) {
-                appState.users = appState.users.slice(-SYSTEM.MAX_USERS);
-            }
-            localStorage.setItem('neon_chat_users', JSON.stringify(appState.users));
         }
 
         function updateUsersUI() {
@@ -1994,13 +2066,21 @@
 
         function refreshChat() {
             loadMessages();
-            loadUsers();
+            loadOnlineUsers();
             showNotification('Sohbet yenilendi!', 'success');
         }
 
         function logout() {
             if (confirm('Çıkış yapmak istediğinize emin misiniz?')) {
                 addSystemMessage(`${appState.currentUser.username} sohbetten ayrıldı.`);
+                
+                // Kullanıcıyı çevrimdışı yap
+                const userIndex = appState.users.findIndex(u => u.username === appState.currentUser.username);
+                if (userIndex > -1) {
+                    appState.users[userIndex].isOnline = false;
+                    localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
+                }
+                
                 location.reload();
             }
         }
@@ -2033,7 +2113,10 @@
         }
 
         function lightenColor(color, percent) {
+            if (!color || color === '#') return '#ff00ff';
             const num = parseInt(color.replace("#", ""), 16);
+            if (isNaN(num)) return '#ff00ff';
+            
             const amt = Math.round(2.55 * percent);
             const R = (num >> 16) + amt;
             const G = (num >> 8 & 0x00FF) + amt;
@@ -2048,25 +2131,41 @@
 
         function playSound(type) {
             try {
-                const audio = new Audio();
+                // Basit bip sesi
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
                 if (type === 'send') {
-                    // Basit bip sesi (Base64 encoded)
-                    audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+                    oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
                 } else if (type === 'broadcast') {
-                    // Bildirim sesi
-                    audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+                    oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
                 }
-                audio.volume = 0.3;
-                audio.play();
+                
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+                
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.2);
             } catch (error) {
                 console.error('Ses çalınamadı:', error);
             }
         }
 
         function startPolling() {
-            // Her 5 saniyede bir güncelle
+            // Her 3 saniyede bir güncelle
             setInterval(() => {
-                loadUsers();
+                // Çevrimiçi kullanıcıları güncelle
+                const userIndex = appState.users.findIndex(u => u.username === appState.currentUser.username);
+                if (userIndex > -1) {
+                    appState.users[userIndex].lastActive = Date.now();
+                    appState.users[userIndex].isOnline = true;
+                    localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
+                }
+                
                 updateUserStats();
             }, SYSTEM.AUTO_REFRESH);
         }
@@ -2079,7 +2178,8 @@
                 user: appState.currentUser.username,
                 messages: appState.messages,
                 users: appState.users,
-                settings: appState.settings
+                settings: appState.settings,
+                allUsers: JSON.parse(localStorage.getItem('neon_chat_all_users') || '[]')
             };
             
             const dataStr = JSON.stringify(data, null, 2);
@@ -2103,12 +2203,13 @@
             
             if (confirm('Tüm mesajları ve kullanıcı verilerini silmek istediğinize emin misiniz?\nBu işlem geri alınamaz!')) {
                 localStorage.removeItem('neon_chat_messages');
-                localStorage.removeItem('neon_chat_users');
+                localStorage.removeItem('neon_chat_online_users');
                 appState.messages = [];
                 appState.users = [appState.currentUser];
                 
                 saveMessages();
-                saveUsers();
+                localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
+                
                 updateMessagesUI();
                 updateUsersUI();
                 
@@ -2155,7 +2256,6 @@
                       `Ad: ${user.username}\n` +
                       `Rol: ${user.role === 'admin' ? '👑 Yönetici' : '👤 Kullanıcı'}\n` +
                       `Durum: ${user.statusMessage || 'Belirtilmemiş'}\n` +
-                      `Katılma: ${new Date(user.joinTime).toLocaleString('tr-TR')}\n` +
                       `Son Aktif: ${new Date(user.lastActive).toLocaleString('tr-TR')}`);
             }
         }
@@ -2190,10 +2290,16 @@
                 return;
             }
             
-            let usersList = 'KULLANICI YÖNETİMİ:\n\n';
-            appState.users.forEach((user, index) => {
-                usersList += `${index + 1}. ${user.username} (${user.role}) - ${user.isOnline ? '🟢 Çevrimiçi' : '⚫ Çevrimdışı'}\n`;
-            });
+            const allUsers = JSON.parse(localStorage.getItem('neon_chat_all_users') || '[]');
+            let usersList = '📋 KAYITLI TÜM KULLANICILAR:\n\n';
+            
+            if (allUsers.length === 0) {
+                usersList += 'Henüz kayıtlı kullanıcı yok.';
+            } else {
+                allUsers.forEach((user, index) => {
+                    usersList += `${index + 1}. ${user.username} (${user.role}) - ${user.email || 'E-pok yok'}\n`;
+                });
+            }
             
             alert(usersList);
         }
@@ -2237,6 +2343,12 @@
                     login();
                 }
             });
+            
+            // Otomatik kayıt bilgisi
+            console.log('🔐 Sistem Bilgisi:');
+            console.log('- Admin: admin / Hayati1959');
+            console.log('- Yeni kullanıcılar otomatik kaydedilir');
+            console.log('- Tüm veriler localStorage\'da saklanır');
         });
     </script>
 </body>
