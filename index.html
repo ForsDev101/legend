@@ -457,11 +457,11 @@
         .message {
             margin-bottom: 25px;
             max-width: 85%;
-            animation: slideIn 0.4s ease;
+            animation: slideIn 0.3s ease;
         }
 
         @keyframes slideIn {
-            from { opacity: 0; transform: translateY(15px); }
+            from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
@@ -1210,7 +1210,7 @@
             <div class="login-card">
                 <div class="logo">
                     <h1>💬 PINK NEON CHAT</h1>
-                    <p>YÖNETİMLİ SOHBET PLATFORMU</p>
+                    <p>ANLIK SOHBET PLATFORMU</p>
                 </div>
                 
                 <div class="login-form">
@@ -1242,7 +1242,7 @@
         <!-- HEADER -->
         <div class="header">
             <div class="header-left">
-                <div class="user-avatar" id="userAvatar" onclick="showProfileModal()">A</div>
+                <div class="user-avatar" id="userAvatar">A</div>
                 <div class="user-info">
                     <h3 id="userName">Admin</h3>
                     <span id="userRole">Yönetici</span>
@@ -1493,21 +1493,16 @@
     <script>
         // === SİSTEM KONFİGÜRASYONU ===
         const SYSTEM = {
-            // GitHub ayarları
             GITHUB_USERNAME: 'ForsDev101',
             GITHUB_REPO: 'legend',
             GITHUB_TOKEN: '',
-            
-            // Admin hesabı
             ADMIN_USERNAME: 'admin',
             ADMIN_PASSWORD: 'Hayati1959',
-            
-            // Sistem ayarları
-            AUTO_REFRESH: 3000, // 3 saniye
+            AUTO_REFRESH: 2000, // 2 saniye
             MAX_MESSAGES: 1000,
-            MESSAGE_COOLDOWN: 1000, // 1 saniye
+            MESSAGE_COOLDOWN: 1000,
             MAX_USERS: 100,
-            VERSION: '2.2.0'
+            VERSION: '3.0.0'
         };
 
         // === UYGULAMA DURUMU ===
@@ -1524,7 +1519,9 @@
             },
             lastMessageTime: 0,
             isOnline: true,
-            cooldownActive: false
+            cooldownActive: false,
+            lastUpdateTime: 0,
+            updateInterval: null
         };
 
         // === GİRİŞ İŞLEMLERİ ===
@@ -1532,7 +1529,6 @@
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value.trim();
             
-            // Validasyon
             if (!username) {
                 showNotification('Kullanıcı adı gereklidir!', 'error');
                 return;
@@ -1549,26 +1545,9 @@
                 role = 'admin';
             }
             
-            // Tüm kullanıcıları yükle
-            loadAllUsers();
-            
-            // Kullanıcı kontrolü
-            const existingUser = appState.users.find(u => u.username === username);
-            
-            if (existingUser) {
-                // Mevcut kullanıcı - şifre kontrolü
-                if (existingUser.password !== password) {
-                    showNotification('Geçersiz şifre!', 'error');
-                    return;
-                }
-                role = existingUser.role || role;
-            } else {
-                // YENİ KULLANICI - OTOMATİK KAYIT
-                showNotification(`Yeni kullanıcı kaydedildi: ${username}`, 'success');
-            }
-            
-            // Kullanıcıyı oluştur/güncelle
+            // Kullanıcıyı oluştur
             appState.currentUser = {
+                id: 'user_' + Date.now(),
                 username: username,
                 role: role,
                 isOnline: true,
@@ -1576,22 +1555,11 @@
                 statusMessage: '',
                 joinTime: Date.now(),
                 lastActive: Date.now(),
-                password: password, // Şifreyi kaydet
-                email: `${username}@neonchat.com`,
-                avatarInitial: username.charAt(0).toUpperCase()
+                password: password
             };
             
-            // Kullanıcıyı listeye ekle
-            if (!existingUser) {
-                appState.users.push(appState.currentUser);
-            } else {
-                // Mevcut kullanıcıyı güncelle
-                const index = appState.users.findIndex(u => u.username === username);
-                appState.users[index] = { ...appState.users[index], ...appState.currentUser };
-            }
-            
-            // Kullanıcıları kaydet
-            saveAllUsers();
+            // Kullanıcıyı kaydet
+            saveUser();
             
             // Giriş animasyonu
             const loginScreen = document.getElementById('loginScreen');
@@ -1605,28 +1573,112 @@
             }, 500);
         }
 
-        function loadAllUsers() {
+        // === JSON KAYDETME FONKSİYONLARI ===
+        function saveUser() {
             try {
-                const saved = localStorage.getItem('neon_chat_all_users');
-                if (saved) {
-                    appState.users = JSON.parse(saved);
-                }
+                // Tüm kullanıcıları yükle
+                let allUsers = JSON.parse(localStorage.getItem('neon_chat_users') || '{}');
+                
+                // Kullanıcıyı ekle/güncelle
+                allUsers[appState.currentUser.username] = {
+                    ...appState.currentUser,
+                    lastLogin: Date.now()
+                };
+                
+                // JSON olarak kaydet
+                localStorage.setItem('neon_chat_users', JSON.stringify(allUsers));
+                
+                // Çevrimiçi kullanıcıları güncelle
+                updateOnlineUsers();
+                
+                return true;
             } catch (error) {
-                console.error('Kullanıcılar yüklenemedi:', error);
-                appState.users = [];
+                console.error('Kullanıcı kaydedilemedi:', error);
+                return false;
             }
         }
 
-        function saveAllUsers() {
-            localStorage.setItem('neon_chat_all_users', JSON.stringify(appState.users));
+        function saveMessage(message) {
+            try {
+                // Mesajları yükle
+                let messages = JSON.parse(localStorage.getItem('neon_chat_messages') || '[]');
+                
+                // Yeni mesajı ekle
+                messages.push(message);
+                
+                // En fazla 1000 mesaj sakla
+                if (messages.length > SYSTEM.MAX_MESSAGES) {
+                    messages = messages.slice(-SYSTEM.MAX_MESSAGES);
+                }
+                
+                // JSON olarak kaydet
+                localStorage.setItem('neon_chat_messages', JSON.stringify(messages));
+                
+                return true;
+            } catch (error) {
+                console.error('Mesaj kaydedilemedi:', error);
+                return false;
+            }
+        }
+
+        function loadMessages() {
+            try {
+                const saved = localStorage.getItem('neon_chat_messages');
+                if (saved) {
+                    appState.messages = JSON.parse(saved);
+                } else {
+                    appState.messages = [];
+                }
+                
+                // Mesajları göster
+                updateMessagesUI();
+                updateStats();
+                
+                return true;
+            } catch (error) {
+                console.error('Mesajlar yüklenemedi:', error);
+                appState.messages = [];
+                return false;
+            }
+        }
+
+        function updateOnlineUsers() {
+            try {
+                // Tüm kullanıcıları yükle
+                const allUsers = JSON.parse(localStorage.getItem('neon_chat_users') || '{}');
+                
+                // Çevrimiçi kullanıcıları filtrele (son 5 dakika içinde aktif olanlar)
+                const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+                
+                appState.users = Object.values(allUsers)
+                    .filter(user => user.lastActive > fiveMinutesAgo)
+                    .map(user => ({
+                        ...user,
+                        isOnline: user.lastActive > fiveMinutesAgo
+                    }));
+                
+                // Çevrimiçi kullanıcı sayısını güncelle
+                updateUsersUI();
+                
+                return true;
+            } catch (error) {
+                console.error('Çevrimiçi kullanıcılar güncellenemedi:', error);
+                return false;
+            }
         }
 
         function initializeApp() {
+            // Ayarları yükle
             loadSettings();
+            
+            // Kullanıcı arayüzünü güncelle
             updateUserUI();
+            
+            // Mesajları yükle
             loadMessages();
-            loadOnlineUsers();
-            startPolling();
+            
+            // Çevrimiçi kullanıcıları yükle
+            updateOnlineUsers();
             
             // Admin panelini göster/gizle
             if (appState.currentUser.role === 'admin') {
@@ -1635,6 +1687,7 @@
                 document.getElementById('adminTab').style.display = 'none';
             }
             
+            // Hoş geldin mesajı
             showNotification(`Hoş geldiniz, ${appState.currentUser.username}!`, 'success');
             
             // Sistem mesajı ekle
@@ -1644,6 +1697,9 @@
             setTimeout(() => {
                 document.getElementById('messageInput').focus();
             }, 500);
+            
+            // Anlık güncelleme başlat
+            startRealTimeUpdates();
         }
 
         function updateUserUI() {
@@ -1659,20 +1715,6 @@
         }
 
         // === MESAJ İŞLEMLERİ ===
-        function loadMessages() {
-            try {
-                const saved = localStorage.getItem('neon_chat_messages');
-                if (saved) {
-                    appState.messages = JSON.parse(saved);
-                }
-                updateMessagesUI();
-                updateStats();
-            } catch (error) {
-                console.error('Mesajlar yüklenemedi:', error);
-                appState.messages = [];
-            }
-        }
-
         function updateMessagesUI() {
             const container = document.getElementById('messagesContainer');
             const emptyChat = document.getElementById('emptyChat');
@@ -1748,44 +1790,40 @@
             sendBtn.disabled = true;
             sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
             
+            // Mesajı kaydet
+            const saved = saveMessage(newMessage);
+            
+            if (saved) {
+                // Listeye ekle
+                appState.messages.push(newMessage);
+                
+                // UI'yı güncelle
+                updateMessagesUI();
+                
+                // Input'u temizle
+                input.value = '';
+                autoResize(input);
+                
+                // Input'a tekrar odaklan
+                input.focus();
+                
+                // Bildirim göster
+                showNotification('Mesaj gönderildi!', 'success');
+                
+                // Ses efekti
+                if (appState.settings.soundEffects) {
+                    playSound('send');
+                }
+            } else {
+                showNotification('Mesaj kaydedilemedi!', 'error');
+            }
+            
+            // Cooldown'u kaldır
             setTimeout(() => {
                 sendBtn.disabled = false;
                 sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>';
                 appState.cooldownActive = false;
             }, SYSTEM.MESSAGE_COOLDOWN);
-            
-            // Listeye ekle
-            appState.messages.push(newMessage);
-            
-            // LocalStorage'a kaydet
-            saveMessages();
-            
-            // UI'yı güncelle
-            updateMessagesUI();
-            
-            // Input'u temizle
-            input.value = '';
-            autoResize(input);
-            
-            // Input'a tekrar odaklan
-            input.focus();
-            
-            // Bildirim göster
-            showNotification('Mesaj gönderildi!', 'success');
-            
-            // Ses efekti
-            if (appState.settings.soundEffects) {
-                playSound('send');
-            }
-        }
-
-        function saveMessages() {
-            // Sadece son 500 mesajı sakla
-            if (appState.messages.length > SYSTEM.MAX_MESSAGES) {
-                appState.messages = appState.messages.slice(-SYSTEM.MAX_MESSAGES);
-            }
-            
-            localStorage.setItem('neon_chat_messages', JSON.stringify(appState.messages));
         }
 
         function addSystemMessage(text) {
@@ -1797,8 +1835,13 @@
                 timestamp: Date.now()
             };
             
+            // Mesajı kaydet
+            saveMessage(systemMessage);
+            
+            // Listeye ekle
             appState.messages.push(systemMessage);
-            saveMessages();
+            
+            // UI'yı güncelle
             updateMessagesUI();
         }
 
@@ -1825,60 +1868,26 @@
                 timestamp: Date.now()
             };
             
-            appState.messages.push(broadcastMessage);
-            saveMessages();
+            // Mesajı kaydet
+            const saved = saveMessage(broadcastMessage);
             
-            input.value = '';
-            updateMessagesUI();
-            showNotification('Duyuru tüm kullanıcılara gönderildi!', 'success');
-            
-            if (appState.settings.soundEffects) {
-                playSound('broadcast');
+            if (saved) {
+                // Listeye ekle
+                appState.messages.push(broadcastMessage);
+                
+                input.value = '';
+                updateMessagesUI();
+                showNotification('Duyuru tüm kullanıcılara gönderildi!', 'success');
+                
+                if (appState.settings.soundEffects) {
+                    playSound('broadcast');
+                }
+            } else {
+                showNotification('Duyuru kaydedilemedi!', 'error');
             }
         }
 
         // === KULLANICI İŞLEMLERİ ===
-        function loadOnlineUsers() {
-            try {
-                // Çevrimiçi kullanıcıları yükle
-                const saved = localStorage.getItem('neon_chat_online_users');
-                if (saved) {
-                    const onlineUsers = JSON.parse(saved);
-                    
-                    // Mevcut kullanıcıyı ekle
-                    const currentUserIndex = onlineUsers.findIndex(u => u.username === appState.currentUser.username);
-                    if (currentUserIndex > -1) {
-                        onlineUsers[currentUserIndex] = { ...onlineUsers[currentUserIndex], ...appState.currentUser, lastActive: Date.now() };
-                    } else {
-                        onlineUsers.push({ ...appState.currentUser, lastActive: Date.now() });
-                    }
-                    
-                    // 5 dakikadan eski kullanıcıları çevrimdışı yap
-                    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
-                    onlineUsers.forEach(user => {
-                        if (user.lastActive < fiveMinutesAgo) {
-                            user.isOnline = false;
-                        }
-                    });
-                    
-                    // Aktif kullanıcıları filtrele
-                    appState.users = onlineUsers.filter(u => u.lastActive > fiveMinutesAgo);
-                    
-                    // Kaydet
-                    localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
-                } else {
-                    // İlk kullanıcı
-                    appState.users = [appState.currentUser];
-                    localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
-                }
-                
-                updateUsersUI();
-            } catch (error) {
-                console.error('Çevrimiçi kullanıcılar yüklenemedi:', error);
-                appState.users = [appState.currentUser];
-            }
-        }
-
         function updateUsersUI() {
             const container = document.getElementById('usersList');
             const badge = document.getElementById('usersBadge');
@@ -1954,6 +1963,60 @@
             document.getElementById('todayMessages').textContent = todayMessages;
         }
 
+        // === ANLIK GÜNCELLEME SİSTEMİ ===
+        function startRealTimeUpdates() {
+            // Her 2 saniyede bir kontrol et
+            appState.updateInterval = setInterval(() => {
+                checkForUpdates();
+            }, SYSTEM.AUTO_REFRESH);
+            
+            // Kullanıcı aktifliğini güncelle
+            setInterval(() => {
+                updateUserActivity();
+            }, 30000); // 30 saniyede bir
+        }
+
+        function checkForUpdates() {
+            // Son güncelleme zamanını kontrol et
+            const lastMessagesUpdate = localStorage.getItem('neon_chat_last_update') || 0;
+            
+            // Eğer yeni güncelleme varsa
+            if (lastMessagesUpdate > appState.lastUpdateTime) {
+                // Mesajları yeniden yükle
+                loadMessages();
+                
+                // Çevrimiçi kullanıcıları güncelle
+                updateOnlineUsers();
+                
+                // Güncelleme zamanını kaydet
+                appState.lastUpdateTime = lastMessagesUpdate;
+            }
+        }
+
+        function updateUserActivity() {
+            try {
+                // Tüm kullanıcıları yükle
+                let allUsers = JSON.parse(localStorage.getItem('neon_chat_users') || '{}');
+                
+                // Mevcut kullanıcının aktifliğini güncelle
+                if (allUsers[appState.currentUser.username]) {
+                    allUsers[appState.currentUser.username].lastActive = Date.now();
+                    allUsers[appState.currentUser.username].isOnline = true;
+                    
+                    // JSON olarak kaydet
+                    localStorage.setItem('neon_chat_users', JSON.stringify(allUsers));
+                    
+                    // Güncelleme zamanını kaydet
+                    localStorage.setItem('neon_chat_last_update', Date.now());
+                    
+                    // Çevrimiçi kullanıcıları güncelle
+                    updateOnlineUsers();
+                }
+            } catch (error) {
+                console.error('Kullanıcı aktifliği güncellenemedi:', error);
+            }
+        }
+
         // === AYARLAR ===
         function loadSettings() {
             try {
@@ -1968,7 +2031,13 @@
         }
 
         function saveSettings() {
-            localStorage.setItem('neon_chat_settings', JSON.stringify(appState.settings));
+            try {
+                localStorage.setItem('neon_chat_settings', JSON.stringify(appState.settings));
+                return true;
+            } catch (error) {
+                console.error('Ayarlar kaydedilemedi:', error);
+                return false;
+            }
         }
 
         function updateSettingsUI() {
@@ -2000,6 +2069,7 @@
             appState.currentUser.avatarColor = color;
             saveSettings();
             updateUserUI();
+            saveUser();
         }
 
         function saveGitHubSettings() {
@@ -2066,21 +2136,32 @@
 
         function refreshChat() {
             loadMessages();
-            loadOnlineUsers();
+            updateOnlineUsers();
             showNotification('Sohbet yenilendi!', 'success');
         }
 
         function logout() {
             if (confirm('Çıkış yapmak istediğinize emin misiniz?')) {
+                // Sistem mesajı ekle
                 addSystemMessage(`${appState.currentUser.username} sohbetten ayrıldı.`);
                 
                 // Kullanıcıyı çevrimdışı yap
-                const userIndex = appState.users.findIndex(u => u.username === appState.currentUser.username);
-                if (userIndex > -1) {
-                    appState.users[userIndex].isOnline = false;
-                    localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
+                try {
+                    let allUsers = JSON.parse(localStorage.getItem('neon_chat_users') || '{}');
+                    if (allUsers[appState.currentUser.username]) {
+                        allUsers[appState.currentUser.username].isOnline = false;
+                        localStorage.setItem('neon_chat_users', JSON.stringify(allUsers));
+                    }
+                } catch (error) {
+                    console.error('Çıkış yapılamadı:', error);
                 }
                 
+                // Güncellemeyi durdur
+                if (appState.updateInterval) {
+                    clearInterval(appState.updateInterval);
+                }
+                
+                // Sayfayı yenile
                 location.reload();
             }
         }
@@ -2131,68 +2212,47 @@
 
         function playSound(type) {
             try {
-                // Basit bip sesi
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const oscillator = audioContext.createOscillator();
-                const gainNode = audioContext.createGain();
-                
-                oscillator.connect(gainNode);
-                gainNode.connect(audioContext.destination);
-                
+                const audio = new Audio();
                 if (type === 'send') {
-                    oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                    audio.src = 'https://assets.mixkit.co/sfx/preview/mixkit-message-pop-alert-2354.mp3';
                 } else if (type === 'broadcast') {
-                    oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+                    audio.src = 'https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3';
                 }
-                
-                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
-                
-                oscillator.start(audioContext.currentTime);
-                oscillator.stop(audioContext.currentTime + 0.2);
+                audio.volume = 0.3;
+                audio.play().catch(e => console.log('Ses çalınamadı:', e));
             } catch (error) {
                 console.error('Ses çalınamadı:', error);
             }
         }
 
-        function startPolling() {
-            // Her 3 saniyede bir güncelle
-            setInterval(() => {
-                // Çevrimiçi kullanıcıları güncelle
-                const userIndex = appState.users.findIndex(u => u.username === appState.currentUser.username);
-                if (userIndex > -1) {
-                    appState.users[userIndex].lastActive = Date.now();
-                    appState.users[userIndex].isOnline = true;
-                    localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
-                }
-                
-                updateUserStats();
-            }, SYSTEM.AUTO_REFRESH);
-        }
-
         function exportAllData() {
-            const data = {
-                system: 'Pink Neon Chat',
-                version: SYSTEM.VERSION,
-                exportedAt: new Date().toISOString(),
-                user: appState.currentUser.username,
-                messages: appState.messages,
-                users: appState.users,
-                settings: appState.settings,
-                allUsers: JSON.parse(localStorage.getItem('neon_chat_all_users') || '[]')
-            };
-            
-            const dataStr = JSON.stringify(data, null, 2);
-            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-            
-            const link = document.createElement('a');
-            link.setAttribute('href', dataUri);
-            link.setAttribute('download', `pink-neon-chat-backup-${Date.now()}.json`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            showNotification('Tüm veriler yedeklendi!', 'success');
+            try {
+                const data = {
+                    system: 'Pink Neon Chat',
+                    version: SYSTEM.VERSION,
+                    exportedAt: new Date().toISOString(),
+                    user: appState.currentUser.username,
+                    messages: appState.messages,
+                    users: appState.users,
+                    settings: appState.settings,
+                    allUsers: JSON.parse(localStorage.getItem('neon_chat_users') || '{}')
+                };
+                
+                const dataStr = JSON.stringify(data, null, 2);
+                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                
+                const link = document.createElement('a');
+                link.setAttribute('href', dataUri);
+                link.setAttribute('download', `pink-neon-chat-backup-${Date.now()}.json`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                showNotification('Tüm veriler yedeklendi!', 'success');
+            } catch (error) {
+                console.error('Veri dışa aktarılamadı:', error);
+                showNotification('Veri dışa aktarılamadı!', 'error');
+            }
         }
 
         function clearAllData() {
@@ -2202,18 +2262,27 @@
             }
             
             if (confirm('Tüm mesajları ve kullanıcı verilerini silmek istediğinize emin misiniz?\nBu işlem geri alınamaz!')) {
-                localStorage.removeItem('neon_chat_messages');
-                localStorage.removeItem('neon_chat_online_users');
-                appState.messages = [];
-                appState.users = [appState.currentUser];
-                
-                saveMessages();
-                localStorage.setItem('neon_chat_online_users', JSON.stringify(appState.users));
-                
-                updateMessagesUI();
-                updateUsersUI();
-                
-                showNotification('Tüm veriler temizlendi!', 'success');
+                try {
+                    localStorage.removeItem('neon_chat_messages');
+                    localStorage.removeItem('neon_chat_last_update');
+                    appState.messages = [];
+                    
+                    // Sadece mevcut kullanıcıyı sakla
+                    const currentUserData = {
+                        [appState.currentUser.username]: appState.currentUser
+                    };
+                    localStorage.setItem('neon_chat_users', JSON.stringify(currentUserData));
+                    
+                    appState.users = [appState.currentUser];
+                    
+                    updateMessagesUI();
+                    updateUsersUI();
+                    
+                    showNotification('Tüm veriler temizlendi!', 'success');
+                } catch (error) {
+                    console.error('Veri temizlenemedi:', error);
+                    showNotification('Veri temizlenemedi!', 'error');
+                }
             }
         }
 
@@ -2250,13 +2319,23 @@
         }
 
         function viewUserProfile(username) {
-            const user = appState.users.find(u => u.username === username);
-            if (user) {
-                alert(`👤 Kullanıcı Profili:\n\n` +
-                      `Ad: ${user.username}\n` +
-                      `Rol: ${user.role === 'admin' ? '👑 Yönetici' : '👤 Kullanıcı'}\n` +
-                      `Durum: ${user.statusMessage || 'Belirtilmemiş'}\n` +
-                      `Son Aktif: ${new Date(user.lastActive).toLocaleString('tr-TR')}`);
+            try {
+                const allUsers = JSON.parse(localStorage.getItem('neon_chat_users') || '{}');
+                const user = allUsers[username];
+                
+                if (user) {
+                    alert(`👤 Kullanıcı Profili:\n\n` +
+                          `Ad: ${user.username}\n` +
+                          `Rol: ${user.role === 'admin' ? '👑 Yönetici' : '👤 Kullanıcı'}\n` +
+                          `Durum: ${user.statusMessage || 'Belirtilmemiş'}\n` +
+                          `Son Aktif: ${new Date(user.lastActive).toLocaleString('tr-TR')}\n` +
+                          `Katılma: ${new Date(user.joinTime).toLocaleString('tr-TR')}`);
+                } else {
+                    showNotification('Kullanıcı bulunamadı!', 'error');
+                }
+            } catch (error) {
+                console.error('Profil görüntülenemedi:', error);
+                showNotification('Profil görüntülenemedi!', 'error');
             }
         }
 
@@ -2277,10 +2356,20 @@
                     recipient: username
                 };
                 
-                appState.messages.push(privateMessage);
-                saveMessages();
-                updateMessagesUI();
-                showNotification(`${username} kullanıcısına özel mesaj gönderildi!`, 'success');
+                // Mesajı kaydet
+                const saved = saveMessage(privateMessage);
+                
+                if (saved) {
+                    // Listeye ekle
+                    appState.messages.push(privateMessage);
+                    
+                    // UI'yı güncelle
+                    updateMessagesUI();
+                    
+                    showNotification(`${username} kullanıcısına özel mesaj gönderildi!`, 'success');
+                } else {
+                    showNotification('Özel mesaj kaydedilemedi!', 'error');
+                }
             }
         }
 
@@ -2290,46 +2379,57 @@
                 return;
             }
             
-            const allUsers = JSON.parse(localStorage.getItem('neon_chat_all_users') || '[]');
-            let usersList = '📋 KAYITLI TÜM KULLANICILAR:\n\n';
-            
-            if (allUsers.length === 0) {
-                usersList += 'Henüz kayıtlı kullanıcı yok.';
-            } else {
-                allUsers.forEach((user, index) => {
-                    usersList += `${index + 1}. ${user.username} (${user.role}) - ${user.email || 'E-pok yok'}\n`;
-                });
+            try {
+                const allUsers = JSON.parse(localStorage.getItem('neon_chat_users') || '{}');
+                let usersList = '📋 KAYITLI TÜM KULLANICILAR:\n\n';
+                
+                if (Object.keys(allUsers).length === 0) {
+                    usersList += 'Henüz kayıtlı kullanıcı yok.';
+                } else {
+                    Object.values(allUsers).forEach((user, index) => {
+                        const isOnline = user.lastActive > Date.now() - (5 * 60 * 1000);
+                        usersList += `${index + 1}. ${user.username} (${user.role}) - ${isOnline ? '🟢 Çevrimiçi' : '⚫ Çevrimdışı'}\n`;
+                    });
+                }
+                
+                alert(usersList);
+            } catch (error) {
+                console.error('Kullanıcılar görüntülenemedi:', error);
+                showNotification('Kullanıcılar görüntülenemedi!', 'error');
             }
-            
-            alert(usersList);
         }
 
         function backupToGitHub() {
-            showNotification('GitHub yedekleme özelliği aktifleştirilecek...', 'info');
+            showNotification('GitHub yedekleme özelliği geliştirme aşamasında...', 'info');
         }
 
         function exportSettings() {
-            const data = {
-                system: 'Pink Neon Chat Settings',
-                exportedAt: new Date().toISOString(),
-                settings: appState.settings,
-                github: {
-                    username: SYSTEM.GITHUB_USERNAME,
-                    repo: SYSTEM.GITHUB_REPO
-                }
-            };
-            
-            const dataStr = JSON.stringify(data, null, 2);
-            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-            
-            const link = document.createElement('a');
-            link.setAttribute('href', dataUri);
-            link.setAttribute('download', `neon-chat-settings-${Date.now()}.json`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            showNotification('Ayarlar yedeklendi!', 'success');
+            try {
+                const data = {
+                    system: 'Pink Neon Chat Settings',
+                    exportedAt: new Date().toISOString(),
+                    settings: appState.settings,
+                    github: {
+                        username: SYSTEM.GITHUB_USERNAME,
+                        repo: SYSTEM.GITHUB_REPO
+                    }
+                };
+                
+                const dataStr = JSON.stringify(data, null, 2);
+                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                
+                const link = document.createElement('a');
+                link.setAttribute('href', dataUri);
+                link.setAttribute('download', `neon-chat-settings-${Date.now()}.json`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                showNotification('Ayarlar yedeklendi!', 'success');
+            } catch (error) {
+                console.error('Ayarlar dışa aktarılamadı:', error);
+                showNotification('Ayarlar dışa aktarılamadı!', 'error');
+            }
         }
 
         // === BAŞLANGIÇ ===
@@ -2344,11 +2444,11 @@
                 }
             });
             
-            // Otomatik kayıt bilgisi
-            console.log('🔐 Sistem Bilgisi:');
-            console.log('- Admin: admin / Hayati1959');
-            console.log('- Yeni kullanıcılar otomatik kaydedilir');
-            console.log('- Tüm veriler localStorage\'da saklanır');
+            // Sistem bilgisi
+            console.log('🚀 Pink Neon Chat v' + SYSTEM.VERSION);
+            console.log('🔐 Admin: admin / Hayati1959');
+            console.log('💾 JSON kaydetme aktif');
+            console.log('⚡ Anlık güncelleme aktif');
         });
     </script>
 </body>
